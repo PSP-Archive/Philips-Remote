@@ -1,0 +1,94 @@
+//////////////////////////////////////////////////////////////////////
+// System Helpers
+
+//////////////////////////////////////////////////////////////////////
+// no system routines to find a thread/semaphore/event by name (AFAIK)
+//   we use the dump APIs to do a linear search ourselves
+
+// extern int sceKernelGetThreadmanIdList(int, SceUID*, int, int*);
+
+#define MAX_UIDS    200     /* overkill max number expected */
+
+static SceUID FindEventFlag(const char* szFind)
+{
+    SceUID uids[MAX_UIDS];
+	int count = 0;
+	sceKernelGetThreadmanIdList(3/*event*/, uids, sizeof(uids), &count);
+    int i;
+    for (i = 0; i < count; i++)
+    {
+        SceUID uid = uids[i];
+		SceKernelEventFlagInfo info;
+	    info.size = sizeof(info);
+	    int err = sceKernelReferEventFlagStatus(uid, &info);
+        if (err == 0 && strcmp(info.name, szFind) == 0)
+            return uid;
+    }
+    return 0;
+}
+
+static SceUID FindSemaphore(const char* szFind)
+{
+    SceUID uids[MAX_UIDS];
+	int count = 0;
+	sceKernelGetThreadmanIdList(2/*sema*/, uids, sizeof(uids), &count);
+    int i;
+    for (i = 0; i < count; i++)
+    {
+        SceUID uid = uids[i];
+		SceKernelSemaInfo info;
+	    info.size = sizeof(info);
+	    int err = sceKernelReferSemaStatus(uid, &info);
+        if (err == 0 && strcmp(info.name, szFind) == 0)
+            return uid;
+    }
+    return 0;
+}
+
+//////////////////////////////////////////////////////////////////////
+// dynamic binding to system entries
+// you can use stubs to system entries in some cases
+//  we use a direct lookup approach instead
+
+static bool g_bFindProcError = false;
+
+static void* FindProc(const char* szMod, const char* szLib, u32 nid)
+{
+    SceModule* modP = sceKernelFindModuleByName(szMod);
+    if (modP == NULL)
+    {
+        printf("Failed to find mod '%s'\n", szMod);
+		g_bFindProcError = true;
+        return 0;
+    }
+    SceLibraryEntryTable* entP = (SceLibraryEntryTable*)modP->ent_top;
+    while ((u32)entP < ((u32)modP->ent_top + modP->ent_size))
+    {
+        if (entP->libname != NULL && strcmp(entP->libname, szLib) == 0)
+        {
+            // found lib
+            int i;
+            int count = entP->stubcount; // NOT: + entP->vstubcount;
+            u32* nidtable = (u32*)entP->entrytable;
+            for (i = 0; i < count; i++)
+            {
+                if (nidtable[i] == nid)
+                {
+                    u32 procAddr = nidtable[count+i];
+                    // printf("entry found: '%s' '%s' = $%x\n", szMod, szLib, (int)procAddr);
+                    return (void*)procAddr;
+                }
+            }
+            printf("Found mod '%s' and lib '%s' but not nid=$%x\n", szMod, szLib, nid);
+			g_bFindProcError = true;
+            return 0;
+        }
+        entP++;
+    }
+    printf("Found mod '%s' but not lib '%s'\n", szMod, szLib);
+	g_bFindProcError = true;
+    return 0;
+}
+
+
+//////////////////////////////////////////////////////////////////////

@@ -1,0 +1,18 @@
+// Standard exit code
+static int exit_callback(int arg1, int arg2, void *common)
+{
+	sceKernelExitGame();
+	return 0;
+}
+
+static int CallbackThread(SceSize args, void *argp)
+{
+	sceKernelRegisterExitCallback(sceKernelCreateCallback("Exit Callback", exit_callback, NULL));
+	sceKernelSleepThreadCB();
+	return 0;
+}
+
+static void SetupCallbacks(void)
+{
+	sceKernelStartThread(sceKernelCreateThread("update_thread", CallbackThread, 0x11, 0xFA0, THREAD_ATTR_USER, 0), 0, 0);
+}
